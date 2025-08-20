@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="https://www.seton.com.br/media/catalog/product/cache/1/image/380x380/9df78eab33525d08d6e5fb8d27136e95/i/m/image-3-compressed_1_1.jpg">
     <title>Rogue Wheels</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
     <style>
         body {
             margin: 0;
@@ -144,7 +145,7 @@
 
     // HUD Elements
     const healthDisplay = document.getElementById('health');
-    const xpTextDisplay = document.getElementById('xp-text'); // *** CHANGED: Target the span for text
+    const xpTextDisplay = document.getElementById('xp-text');
     const powerUpDisplay = document.getElementById('power-up');
 
     // Screen Elements
@@ -162,13 +163,54 @@
     const JUMP_FORCE = -14;
     const PLAYER_SPEED = 5;
     const STOMP_BOUNCE = -7;
-    const TILE_SIZE = 50; // Define a standard size for room template grids
+    const TILE_SIZE = 50;
+    const COYOTE_TIME_FRAMES = 8;
+    const JUMP_BUFFER_FRAMES = 8;
 
-    let player, keys, camera, platforms, items, enemies, projectiles, particles, hudParticles;
+    let player, keys, camera, platforms, items, enemies, projectiles, particles, hudParticles, gravestones;
     let generationCursor;
     let xpShakeTimer = 0;
 
-    // *** Room Template Library ***
+    // *** ADDED: Sound Effects using Tone.js ***
+    const sounds = {
+        synth: new Tone.Synth().toDestination(),
+        noise: new Tone.NoiseSynth().toDestination(),
+        poly: new Tone.PolySynth(Tone.Synth).toDestination(),
+
+        play(sound) {
+            if (Tone.context.state !== 'running') {
+                return;
+            }
+            switch(sound) {
+                case 'jump':
+                    this.synth.triggerAttackRelease("C5", "8n");
+                    break;
+                case 'stomp':
+                    this.noise.triggerAttackRelease("8n", undefined, 0.8);
+                    break;
+                case 'collectXP':
+                    this.synth.triggerAttackRelease("G5", "16n");
+                    break;
+                case 'collectHealth':
+                    this.poly.triggerAttackRelease(["C4", "E4", "G4"], "8n");
+                    break;
+                case 'collectPowerUp':
+                    this.poly.triggerAttackRelease(["C5", "E5", "G5", "C6"], "4n");
+                    break;
+                case 'playerHurt':
+                    this.synth.triggerAttackRelease("C#3", "8n");
+                    break;
+                case 'enemyShoot':
+                    this.noise.triggerAttackRelease("16n", undefined, 0.3);
+                    break;
+                case 'playerDeath':
+                    this.poly.triggerAttackRelease(["G3", "E3", "C3"], "2n");
+                    break;
+            }
+        }
+    };
+
+    // Room Template Library
     const roomTemplates = {
         'start': {
             width: 4 * TILE_SIZE,
@@ -191,8 +233,8 @@
         'multi_level': {
             width: 12 * TILE_SIZE,
             platforms: [
-                { x: 0, y: 0, width: 12 * TILE_SIZE }, // Bottom floor
-                { x: 2 * TILE_SIZE, y: -4 * TILE_SIZE, width: 8 * TILE_SIZE } // Upper platform
+                { x: 0, y: 0, width: 12 * TILE_SIZE },
+                { x: 2 * TILE_SIZE, y: -4 * TILE_SIZE, width: 8 * TILE_SIZE }
             ],
             exit: { x: 12 * TILE_SIZE, y: 0 }
         },
@@ -234,6 +276,9 @@
             health: 5, maxHealth: 5, xp: 0,
             powerUp: null, powerUpTimer: 0, isImmune: false,
             canDoubleJump: false, doubleJumpUsed: false, speedMultiplier: 1,
+            isDying: false, rotation: 0,
+            coyoteTimeCounter: 0,
+            jumpBufferCounter: 0
         };
 
         keys = { right: false, left: false, jump: false };
@@ -248,6 +293,7 @@
         projectiles = [];
         particles = [];
         hudParticles = [];
+        gravestones = [];
         
         generationCursor = { x: 50, y: canvas.height - 100 };
 
@@ -343,6 +389,18 @@
         }
     }
 
+    function spawnSpeedParticles(x, y) {
+        particles.push({
+            x: x,
+            y: y + (Math.random() - 0.5) * player.height * 0.8,
+            vx: -player.vx * 0.2,
+            vy: (Math.random() - 0.5) * 2,
+            size: Math.random() * 4 + 2,
+            life: 15 + Math.random() * 10,
+            color: `rgba(255, 220, 0, ${Math.random() * 0.5 + 0.5})`
+        });
+    }
+
     function spawnHudParticles(x, y, color) {
         for (let i = 0; i < 15; i++) {
             hudParticles.push({
@@ -372,6 +430,19 @@
 
     // --- UPDATE LOGIC ---
     function update() {
+        if (player.isDying) {
+            player.vy += GRAVITY * 0.8;
+            player.y += player.vy;
+            player.rotation += 15;
+            
+            if (player.y > camera.y + canvas.height + 100) {
+                showGameOverScreen();
+            }
+            updateParticles(particles);
+            updateParticles(hudParticles);
+            return;
+        }
+
         // Player Movement
         player.vx = 0;
         if (keys.left) { player.vx = -player.speed * player.speedMultiplier; player.facingRight = false; }
@@ -381,6 +452,8 @@
         // Gravity and Vertical Movement
         player.vy += GRAVITY;
         player.y += player.vy;
+        
+        const wasOnGround = player.onGround;
         player.onGround = false;
 
         // Platform Collision
@@ -399,6 +472,29 @@
                 }
             }
         });
+
+        // Coyote Time & Jump Buffer Logic
+        if (player.onGround) {
+            player.coyoteTimeCounter = COYOTE_TIME_FRAMES;
+        } else {
+            if (wasOnGround) {
+                player.coyoteTimeCounter = COYOTE_TIME_FRAMES;
+            } else {
+                player.coyoteTimeCounter--;
+            }
+        }
+
+        if (player.jumpBufferCounter > 0) {
+            if (player.onGround) {
+                player.vy = JUMP_FORCE;
+                player.onGround = false;
+                spawnJumpParticles(player.x + player.width / 2, player.y + player.height);
+                sounds.play('jump');
+                player.jumpBufferCounter = 0;
+            } else {
+                player.jumpBufferCounter--;
+            }
+        }
         
         // Item Collision
         items.forEach((item, index) => {
@@ -418,13 +514,15 @@
                     enemies.splice(index, 1);
                     player.vy = STOMP_BOUNCE;
                     player.xp += 10;
-                    xpShakeTimer = 20; // Increased duration
-                } else if (player.isImmune) {
+                    xpShakeTimer = 20;
+                    sounds.play('stomp');
+                } else if (player.isImmune && player.powerUp === 'star') {
                     spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
                     enemies.splice(index, 1);
                     player.xp += 10;
-                    xpShakeTimer = 20; // Increased duration
-                } else {
+                    xpShakeTimer = 20;
+                    sounds.play('stomp');
+                } else if (!player.isImmune) {
                     takeDamage(enemy.type === 'ghost' ? 1 : 2);
                 }
             }
@@ -446,27 +544,35 @@
         updateParticles(particles);
         updateParticles(hudParticles);
 
+        if (player.powerUp === 'bolt' && player.vx !== 0) {
+            if (Math.random() < 0.7) {
+                 spawnSpeedParticles(player.x + player.width / 2, player.y + player.height / 2);
+            }
+        }
+
         // Update Camera position and zoom
         if (player.vx !== 0) {
-            camera.targetZoom = 1.1; // Zoom in
+            camera.targetZoom = 1.1;
         } else {
-            camera.targetZoom = 1.0; // Zoom out
+            camera.targetZoom = 1.0;
         }
         camera.zoom += (camera.targetZoom - camera.zoom) * 0.04;
 
         camera.x += (player.x - camera.x) * 0.05;
         camera.y += (player.y - camera.y) * 0.05;
         
-        // *** CHANGED: Update XP Shake with new styles ***
+        // Update XP Shake
         if (xpShakeTimer > 0) {
-            const shakeX = (Math.random() - 0.5) * 8; // More intense
+            const shakeX = (Math.random() - 0.5) * 8; 
             const shakeY = (Math.random() - 0.5) * 8;
-            xpTextDisplay.style.transform = `translate(${shakeX}px, ${shakeY}px)`;
+            const scale = 1.5;
+            const rotation = 10;
+            xpTextDisplay.style.transform = `translate(${shakeX}px, ${shakeY}px) scale(${scale}) rotate(${rotation}deg)`;
             xpTextDisplay.style.color = 'yellow';
             xpTextDisplay.style.fontWeight = 'bold';
             xpShakeTimer--;
         } else {
-            xpTextDisplay.style.transform = 'translate(0, 0)';
+            xpTextDisplay.style.transform = 'translate(0, 0) scale(1) rotate(0deg)';
             xpTextDisplay.style.color = 'white';
             xpTextDisplay.style.fontWeight = 'normal';
         }
@@ -477,7 +583,9 @@
         }
 
         // Check for falling out of world
-        if (player.y > camera.y + canvas.height + 400) { gameOver(); }
+        if (player.y > camera.y + canvas.height + 400) { 
+            startDeathSequence(); 
+        }
     }
 
     function updateEnemies() {
@@ -505,6 +613,7 @@
                             y: enemy.y + enemy.height / 2,
                             width: 20, height: 10, vx: 8 * enemy.facingDirection
                         });
+                        sounds.play('enemyShoot');
                         enemy.shootCooldown = 180 + Math.random() * 60;
                         enemy.isWarning = false;
                     }
@@ -535,24 +644,29 @@
         switch (type) {
             case 'xp': 
                 player.xp += 5; 
-                xpShakeTimer = 20; // Increased duration
+                xpShakeTimer = 20;
+                sounds.play('collectXP');
                 break;
             case 'health': 
                 if (player.health < player.maxHealth) {
                     const heartX = 15 + (player.health * 24) + 12;
                     const heartY = 15 + 12;
                     player.health++; 
-                    spawnHudParticles(heartX, heartY, '255, 255, 0'); // Yellow particles
+                    spawnHudParticles(heartX, heartY, '255, 255, 0');
+                    sounds.play('collectHealth');
                 } 
                 break;
-            case 'star': startPowerUp('star', 15 * 60); break;
-            case 'boots': startPowerUp('boots', 30 * 60); break;
-            case 'bolt': startPowerUp('bolt', 25 * 60); break;
+            case 'star': 
+            case 'boots': 
+            case 'bolt': 
+                startPowerUp(type, type === 'star' ? 15*60 : type === 'boots' ? 30*60 : 25*60); 
+                sounds.play('collectPowerUp');
+                break;
         }
     }
     
     function takeDamage(amount) {
-        if (player.isImmune) return;
+        if (player.isImmune || player.isDying) return;
         
         let finalDamage = amount;
         if (amount === 3 && player.health <= 3) { finalDamage = player.health - 1; }
@@ -561,13 +675,14 @@
         const heartY = 15 + 12;
 
         player.health -= finalDamage;
-        spawnHudParticles(heartX, heartY, '255, 50, 50'); // Red particles
+        spawnHudParticles(heartX, heartY, '255, 50, 50');
         camera.shakeDuration = 20;
         camera.shakeMagnitude = 8;
+        sounds.play('playerHurt');
 
         if (player.health <= 0) {
             player.health = 0;
-            gameOver();
+            startDeathSequence();
         } else {
             player.isImmune = true;
             setTimeout(() => {
@@ -598,8 +713,21 @@
         player.powerUpTimer = 0;
     }
 
-    function gameOver() {
+    function startDeathSequence() {
+        if (player.isDying) return;
+        player.isDying = true;
+        player.vy = JUMP_FORCE * 0.8;
+        const gravestoneX = player.x;
+        const gravestoneY = player.y + player.height - 20;
+        gravestones.push({ x: gravestoneX, y: gravestoneY, facingRight: player.facingRight });
+        spawnHudParticles(gravestoneX, gravestoneY, '255, 50, 50');
+        sounds.play('playerDeath');
+    }
+
+    function showGameOverScreen() {
+        if (!gameRunning) return;
         gameRunning = false;
+        player.isDying = false;
         cancelAnimationFrame(gameLoopId);
         finalScoreDisplay.textContent = `Sua pontuação final: ${player.xp} 🔆`;
         gameOverScreen.style.display = 'flex';
@@ -636,6 +764,20 @@
 
         ctx.fillStyle = '#FFFFFF';
 
+        // Draw gravestones
+        ctx.font = '40px sans-serif';
+        gravestones.forEach(g => {
+            ctx.save();
+            if (g.facingRight) {
+                ctx.translate(g.x + 40, g.y);
+                ctx.scale(-1, 1);
+                ctx.fillText('🦽', 0, 0);
+            } else {
+                ctx.fillText('🦽', g.x, g.y);
+            }
+            ctx.restore();
+        });
+
         // Draw items
         ctx.font = '30px sans-serif';
         items.forEach(item => {
@@ -660,11 +802,11 @@
                 case 'flyer': emoji = '👾'; break;
                 case 'dragon': 
                     emoji = '🐉';
-                    if (enemy.facingDirection > 0) { // Facing right
+                    if (enemy.facingDirection > 0) {
                         ctx.translate(enemy.x + enemy.width, enemy.y);
                         ctx.scale(-1, 1);
                         ctx.fillText(emoji, 0, enemy.height);
-                    } else { // Facing left
+                    } else {
                         ctx.fillText(emoji, enemy.x, enemy.y + enemy.height);
                     }
                     break;
@@ -692,18 +834,25 @@
 
         // Draw player
         ctx.save();
-        if (player.isImmune) {
-            ctx.globalAlpha = (Math.sin(Date.now() / 50) + 1) / 2 * 0.5 + 0.5;
-            if (player.powerUp === 'star') { ctx.shadowColor = 'yellow'; ctx.shadowBlur = 20; }
-        }
-        
-        ctx.font = '50px sans-serif';
-        if (player.facingRight) {
-            ctx.translate(player.x + player.width, player.y);
-            ctx.scale(-1, 1);
-            ctx.fillText('👨‍🦼', 0, player.height);
+        if (player.isDying) {
+            ctx.font = '50px sans-serif';
+            ctx.translate(player.x + player.width / 2, player.y + player.height / 2);
+            ctx.rotate(player.rotation * Math.PI / 180);
+            ctx.fillText('🤸', -player.width / 2, player.height / 2);
         } else {
-            ctx.fillText('👨‍🦼', player.x, player.y + player.height);
+            if (player.isImmune) {
+                ctx.globalAlpha = (Math.sin(Date.now() / 50) + 1) / 2 * 0.5 + 0.5;
+                if (player.powerUp === 'star') { ctx.shadowColor = 'yellow'; ctx.shadowBlur = 20; }
+            }
+            
+            ctx.font = '50px sans-serif';
+            if (player.facingRight) {
+                ctx.translate(player.x + player.width, player.y);
+                ctx.scale(-1, 1);
+                ctx.fillText('👨‍🦼', 0, player.height);
+            } else {
+                ctx.fillText('👨‍🦼', player.x, player.y + player.height);
+            }
         }
         ctx.restore();
 
@@ -718,7 +867,7 @@
     
     function drawHUD() {
         healthDisplay.innerHTML = '❤️'.repeat(player.health);
-        xpTextDisplay.textContent = player.xp; // *** CHANGED: Update only the text content
+        xpTextDisplay.textContent = player.xp;
 
         let powerUpHTML = '';
         if (player.powerUp) {
@@ -739,7 +888,7 @@
 
     // --- MAIN GAME LOOP ---
     function gameLoop() {
-        if (!gameRunning) return;
+        if (!gameRunning && !player.isDying) return;
         update();
         draw();
         drawHUD();
@@ -753,14 +902,19 @@
             case 'KeyA': case 'ArrowLeft': keys.left = true; break;
             case 'KeyD': case 'ArrowRight': keys.right = true; break;
             case 'Space':
-                if (player.onGround) {
+                if (player.coyoteTimeCounter > 0) {
                     player.vy = JUMP_FORCE;
                     player.onGround = false;
+                    player.coyoteTimeCounter = 0;
                     spawnJumpParticles(player.x + player.width / 2, player.y + player.height);
+                    sounds.play('jump');
                 } else if (player.canDoubleJump && !player.doubleJumpUsed) {
                     player.vy = JUMP_FORCE * 0.9;
                     player.doubleJumpUsed = true;
                     spawnJumpParticles(player.x + player.width / 2, player.y + player.height);
+                    sounds.play('jump');
+                } else {
+                    player.jumpBufferCounter = JUMP_BUFFER_FRAMES;
                 }
                 break;
         }
@@ -775,6 +929,7 @@
     });
 
     startButton.addEventListener('click', () => {
+        Tone.start(); // *** ADDED: Start audio context on user interaction
         startScreen.style.display = 'none';
         init();
         gameRunning = true;
