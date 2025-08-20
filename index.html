@@ -53,6 +53,11 @@
             top: 15px;
             right: 15px;
         }
+        /* Style for the XP text specifically */
+        #xp-text {
+             display: inline-block; /* Needed for transform to work correctly */
+             transition: transform 0.1s, color 0.1s, font-weight 0.1s;
+        }
         #power-up {
             position: absolute;
             bottom: 15px;
@@ -112,7 +117,9 @@
 <div id="game-container">
     <div id="hud">
         <div id="health"></div>
-        <div id="xp"></div>
+        <div id="xp">
+            <span>🔆 </span><span id="xp-text">0</span>
+        </div>
         <div id="power-up"></div>
     </div>
     <div id="start-screen">
@@ -137,7 +144,7 @@
 
     // HUD Elements
     const healthDisplay = document.getElementById('health');
-    const xpDisplay = document.getElementById('xp');
+    const xpTextDisplay = document.getElementById('xp-text'); // *** CHANGED: Target the span for text
     const powerUpDisplay = document.getElementById('power-up');
 
     // Screen Elements
@@ -157,10 +164,11 @@
     const STOMP_BOUNCE = -7;
     const TILE_SIZE = 50; // Define a standard size for room template grids
 
-    let player, keys, camera, platforms, items, enemies, projectiles;
+    let player, keys, camera, platforms, items, enemies, projectiles, particles, hudParticles;
     let generationCursor;
+    let xpShakeTimer = 0;
 
-    // *** NEW: Room Template Library ***
+    // *** Room Template Library ***
     const roomTemplates = {
         'start': {
             width: 4 * TILE_SIZE,
@@ -200,13 +208,10 @@
         'shaft': {
             width: 10 * TILE_SIZE,
             platforms: [
-                // Entry platform
                 { x: 0, y: 0, width: 3 * TILE_SIZE },
-                // Shaft platforms
                 { x: 1 * TILE_SIZE, y: 2 * TILE_SIZE, width: 2 * TILE_SIZE },
                 { x: 7 * TILE_SIZE, y: 4 * TILE_SIZE, width: 2 * TILE_SIZE },
                 { x: 1 * TILE_SIZE, y: 6 * TILE_SIZE, width: 2 * TILE_SIZE },
-                // Bottom floor
                 { x: 0, y: 8 * TILE_SIZE, width: 10 * TILE_SIZE }
             ],
             exit: { x: 10 * TILE_SIZE, y: 8 * TILE_SIZE }
@@ -224,8 +229,7 @@
         player = {
             x: 150,
             y: canvas.height - 200,
-            width: 50,
-            height: 50,
+            width: 50, height: 50,
             vx: 0, vy: 0, speed: PLAYER_SPEED, onGround: false, facingRight: true,
             health: 5, maxHealth: 5, xp: 0,
             powerUp: null, powerUpTimer: 0, isImmune: false,
@@ -233,15 +237,20 @@
         };
 
         keys = { right: false, left: false, jump: false };
-        camera = { x: 0, y: 0 };
+        camera = { 
+            x: 0, y: 0,
+            zoom: 1.0, targetZoom: 1.0,
+            shakeDuration: 0, shakeMagnitude: 0
+        };
         platforms = [];
         items = [];
         enemies = [];
         projectiles = [];
+        particles = [];
+        hudParticles = [];
         
         generationCursor = { x: 50, y: canvas.height - 100 };
 
-        // Generate the initial world using the new room system
         stampRoom('start');
         for(let i = 0; i < 15; i++) {
              stampRoom();
@@ -263,16 +272,10 @@
             };
             platforms.push(newPlatform);
 
-            // Spawn items and enemies on this new platform
-            if (Math.random() < 0.2) {
-                spawnItem(newPlatform);
-            }
-            if (Math.random() < 0.25) {
-                spawnEnemy(newPlatform);
-            }
+            if (Math.random() < 0.2) spawnItem(newPlatform);
+            if (Math.random() < 0.25) spawnEnemy(newPlatform);
         });
 
-        // Move the cursor to the exit of the stamped room
         generationCursor.x += template.exit.x;
         generationCursor.y += template.exit.y;
     }
@@ -316,6 +319,56 @@
             isWarning: false, facingDirection: -1
         });
     }
+
+    // --- PARTICLE SYSTEMS ---
+    function spawnJumpParticles(x, y) {
+        for (let i = 0; i < 8; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 4, vy: (Math.random() * -3) - 1,
+                size: Math.random() * 5 + 3, life: 30 + Math.random() * 20,
+                color: `rgba(200, 200, 200, ${Math.random() * 0.5 + 0.3})`
+            });
+        }
+    }
+    
+    function spawnExplosionParticles(x, y) {
+        for (let i = 0; i < 20; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6,
+                size: Math.random() * 8 + 4, life: 25 + Math.random() * 15,
+                color: `rgba(50, 50, 50, ${Math.random() * 0.5 + 0.4})`
+            });
+        }
+    }
+
+    function spawnHudParticles(x, y, color) {
+        for (let i = 0; i < 15; i++) {
+            hudParticles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5,
+                size: Math.random() * 4 + 2, life: 40 + Math.random() * 20,
+                color: `rgba(${color}, ${Math.random() * 0.6 + 0.4})`
+            });
+        }
+    }
+
+    function updateParticles(particleArray) {
+        for (let i = particleArray.length - 1; i >= 0; i--) {
+            const p = particleArray[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.1; 
+            p.life--;
+            p.size *= 0.98;
+
+            if (p.life <= 0 || p.size < 0.5) {
+                particleArray.splice(i, 1);
+            }
+        }
+    }
+
 
     // --- UPDATE LOGIC ---
     function update() {
@@ -361,12 +414,16 @@
             if (player.x < enemy.x + enemy.width && player.x + player.width > enemy.x &&
                 player.y < enemy.y + enemy.height && player.y + player.height > enemy.y) {
                 if (player.vy > 0 && (player.y + player.height - player.vy) <= enemy.y + 10) {
+                    spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
                     enemies.splice(index, 1);
                     player.vy = STOMP_BOUNCE;
                     player.xp += 10;
+                    xpShakeTimer = 20; // Increased duration
                 } else if (player.isImmune) {
+                    spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
                     enemies.splice(index, 1);
                     player.xp += 10;
+                    xpShakeTimer = 20; // Increased duration
                 } else {
                     takeDamage(enemy.type === 'ghost' ? 1 : 2);
                 }
@@ -386,11 +443,34 @@
         updateEnemies();
         updateProjectiles();
         updatePowerUp();
+        updateParticles(particles);
+        updateParticles(hudParticles);
 
-        // Update Camera
-        camera.x += (player.x - camera.x - canvas.width / 3) * 0.1;
-        camera.y += (player.y - camera.y - canvas.height / 2) * 0.1;
+        // Update Camera position and zoom
+        if (player.vx !== 0) {
+            camera.targetZoom = 1.1; // Zoom in
+        } else {
+            camera.targetZoom = 1.0; // Zoom out
+        }
+        camera.zoom += (camera.targetZoom - camera.zoom) * 0.04;
+
+        camera.x += (player.x - camera.x) * 0.05;
+        camera.y += (player.y - camera.y) * 0.05;
         
+        // *** CHANGED: Update XP Shake with new styles ***
+        if (xpShakeTimer > 0) {
+            const shakeX = (Math.random() - 0.5) * 8; // More intense
+            const shakeY = (Math.random() - 0.5) * 8;
+            xpTextDisplay.style.transform = `translate(${shakeX}px, ${shakeY}px)`;
+            xpTextDisplay.style.color = 'yellow';
+            xpTextDisplay.style.fontWeight = 'bold';
+            xpShakeTimer--;
+        } else {
+            xpTextDisplay.style.transform = 'translate(0, 0)';
+            xpTextDisplay.style.color = 'white';
+            xpTextDisplay.style.fontWeight = 'normal';
+        }
+
         // Generate new chunks if needed
         if (player.x > generationCursor.x - canvas.width * 2) {
             stampRoom();
@@ -453,8 +533,18 @@
 
     function collectItem(type) {
         switch (type) {
-            case 'xp': player.xp += 5; break;
-            case 'health': if (player.health < player.maxHealth) { player.health++; } break;
+            case 'xp': 
+                player.xp += 5; 
+                xpShakeTimer = 20; // Increased duration
+                break;
+            case 'health': 
+                if (player.health < player.maxHealth) {
+                    const heartX = 15 + (player.health * 24) + 12;
+                    const heartY = 15 + 12;
+                    player.health++; 
+                    spawnHudParticles(heartX, heartY, '255, 255, 0'); // Yellow particles
+                } 
+                break;
             case 'star': startPowerUp('star', 15 * 60); break;
             case 'boots': startPowerUp('boots', 30 * 60); break;
             case 'bolt': startPowerUp('bolt', 25 * 60); break;
@@ -467,7 +557,14 @@
         let finalDamage = amount;
         if (amount === 3 && player.health <= 3) { finalDamage = player.health - 1; }
 
+        const heartX = 15 + ((player.health - 1) * 24) + 12;
+        const heartY = 15 + 12;
+
         player.health -= finalDamage;
+        spawnHudParticles(heartX, heartY, '255, 50, 50'); // Red particles
+        camera.shakeDuration = 20;
+        camera.shakeMagnitude = 8;
+
         if (player.health <= 0) {
             player.health = 0;
             gameOver();
@@ -504,7 +601,7 @@
     function gameOver() {
         gameRunning = false;
         cancelAnimationFrame(gameLoopId);
-        finalScoreDisplay.textContent = `Sua pontuação final: ${player.xp} �`;
+        finalScoreDisplay.textContent = `Sua pontuação final: ${player.xp} 🔆`;
         gameOverScreen.style.display = 'flex';
     }
 
@@ -514,11 +611,30 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         ctx.save();
-        ctx.translate(-camera.x, -camera.y);
+        
+        let shakeX = 0;
+        let shakeY = 0;
+        if (camera.shakeDuration > 0) {
+            shakeX = (Math.random() - 0.5) * camera.shakeMagnitude;
+            shakeY = (Math.random() - 0.5) * camera.shakeMagnitude;
+            camera.shakeDuration--;
+        }
+
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.scale(camera.zoom, camera.zoom);
+        ctx.translate(-camera.x - shakeX, -camera.y - shakeY);
 
         // Draw platforms
         ctx.fillStyle = '#4a4a4a';
         platforms.forEach(p => { ctx.fillRect(p.x, p.y, p.width, p.height); });
+        
+        // Draw world particles
+        particles.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+        });
+
+        ctx.fillStyle = '#FFFFFF';
 
         // Draw items
         ctx.font = '30px sans-serif';
@@ -592,11 +708,17 @@
         ctx.restore();
 
         ctx.restore();
+
+        // Draw HUD particles on top of everything
+        hudParticles.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+        });
     }
     
     function drawHUD() {
         healthDisplay.innerHTML = '❤️'.repeat(player.health);
-        xpDisplay.innerHTML = `🔆 ${player.xp}`;
+        xpTextDisplay.textContent = player.xp; // *** CHANGED: Update only the text content
 
         let powerUpHTML = '';
         if (player.powerUp) {
@@ -634,9 +756,11 @@
                 if (player.onGround) {
                     player.vy = JUMP_FORCE;
                     player.onGround = false;
+                    spawnJumpParticles(player.x + player.width / 2, player.y + player.height);
                 } else if (player.canDoubleJump && !player.doubleJumpUsed) {
                     player.vy = JUMP_FORCE * 0.9;
                     player.doubleJumpUsed = true;
+                    spawnJumpParticles(player.x + player.width / 2, player.y + player.height);
                 }
                 break;
         }
@@ -672,5 +796,3 @@
 </script>
 </body>
 </html>
-
-�
