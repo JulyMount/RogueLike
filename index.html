@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="https://www.seton.com.br/media/catalog/product/cache/1/image/380x380/9df78eab33525d08d6e5fb8d27136e95/i/m/image-3-compressed_1_1.jpg">
     <title>Rogue Wheels</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
     <style>
         body {
             margin: 0;
@@ -125,7 +124,7 @@
     </div>
     <div id="start-screen">
         <h1>Aventura Procedural</h1>
-        <p>Use <b>A</b> e <b>D</b> para mover e <b>Espaço</b> para pular.</p>
+        <p>Use <b>A/D</b> para mover, <b>Espaço</b> para pular e <b>S</b> para descer.</p>
         <p>Explore o mapa, colete 🔆 para XP e pise nos inimigos para derrotá-los!</p>
         <p>💊: Recupera Vida | ⭐: Invencibilidade | 👣: Pulo Duplo | ⚡: Velocidade</p>
         <button id="start-button">Iniciar Jogo</button>
@@ -166,49 +165,11 @@
     const TILE_SIZE = 50;
     const COYOTE_TIME_FRAMES = 8;
     const JUMP_BUFFER_FRAMES = 8;
+    const MAX_FALL_SPEED = 18; // To prevent tunneling through platforms
 
     let player, keys, camera, platforms, items, enemies, projectiles, particles, hudParticles, gravestones;
     let generationCursor;
     let xpShakeTimer = 0;
-
-    // *** ADDED: Sound Effects using Tone.js ***
-    const sounds = {
-        synth: new Tone.Synth().toDestination(),
-        noise: new Tone.NoiseSynth().toDestination(),
-        poly: new Tone.PolySynth(Tone.Synth).toDestination(),
-
-        play(sound) {
-            if (Tone.context.state !== 'running') {
-                return;
-            }
-            switch(sound) {
-                case 'jump':
-                    this.synth.triggerAttackRelease("C5", "8n");
-                    break;
-                case 'stomp':
-                    this.noise.triggerAttackRelease("8n", undefined, 0.8);
-                    break;
-                case 'collectXP':
-                    this.synth.triggerAttackRelease("G5", "16n");
-                    break;
-                case 'collectHealth':
-                    this.poly.triggerAttackRelease(["C4", "E4", "G4"], "8n");
-                    break;
-                case 'collectPowerUp':
-                    this.poly.triggerAttackRelease(["C5", "E5", "G5", "C6"], "4n");
-                    break;
-                case 'playerHurt':
-                    this.synth.triggerAttackRelease("C#3", "8n");
-                    break;
-                case 'enemyShoot':
-                    this.noise.triggerAttackRelease("16n", undefined, 0.3);
-                    break;
-                case 'playerDeath':
-                    this.poly.triggerAttackRelease(["G3", "E3", "C3"], "2n");
-                    break;
-            }
-        }
-    };
 
     // Room Template Library
     const roomTemplates = {
@@ -451,6 +412,7 @@
 
         // Gravity and Vertical Movement
         player.vy += GRAVITY;
+        player.vy = Math.min(player.vy, MAX_FALL_SPEED);
         player.y += player.vy;
         
         const wasOnGround = player.onGround;
@@ -489,7 +451,6 @@
                 player.vy = JUMP_FORCE;
                 player.onGround = false;
                 spawnJumpParticles(player.x + player.width / 2, player.y + player.height);
-                sounds.play('jump');
                 player.jumpBufferCounter = 0;
             } else {
                 player.jumpBufferCounter--;
@@ -515,13 +476,11 @@
                     player.vy = STOMP_BOUNCE;
                     player.xp += 10;
                     xpShakeTimer = 20;
-                    sounds.play('stomp');
                 } else if (player.isImmune && player.powerUp === 'star') {
                     spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
                     enemies.splice(index, 1);
                     player.xp += 10;
                     xpShakeTimer = 20;
-                    sounds.play('stomp');
                 } else if (!player.isImmune) {
                     takeDamage(enemy.type === 'ghost' ? 1 : 2);
                 }
@@ -577,6 +536,13 @@
             xpTextDisplay.style.fontWeight = 'normal';
         }
 
+        // Despawn off-screen objects to prevent freezing
+        const despawnX = camera.x - canvas.width;
+        platforms = platforms.filter(p => p.x + p.width > despawnX);
+        items = items.filter(i => i.x + i.width > despawnX);
+        enemies = enemies.filter(e => e.x + e.width > despawnX);
+        gravestones = gravestones.filter(g => g.x > despawnX);
+
         // Generate new chunks if needed
         if (player.x > generationCursor.x - canvas.width * 2) {
             stampRoom();
@@ -613,7 +579,6 @@
                             y: enemy.y + enemy.height / 2,
                             width: 20, height: 10, vx: 8 * enemy.facingDirection
                         });
-                        sounds.play('enemyShoot');
                         enemy.shootCooldown = 180 + Math.random() * 60;
                         enemy.isWarning = false;
                     }
@@ -645,7 +610,6 @@
             case 'xp': 
                 player.xp += 5; 
                 xpShakeTimer = 20;
-                sounds.play('collectXP');
                 break;
             case 'health': 
                 if (player.health < player.maxHealth) {
@@ -653,14 +617,12 @@
                     const heartY = 15 + 12;
                     player.health++; 
                     spawnHudParticles(heartX, heartY, '255, 255, 0');
-                    sounds.play('collectHealth');
                 } 
                 break;
             case 'star': 
             case 'boots': 
             case 'bolt': 
                 startPowerUp(type, type === 'star' ? 15*60 : type === 'boots' ? 30*60 : 25*60); 
-                sounds.play('collectPowerUp');
                 break;
         }
     }
@@ -678,7 +640,6 @@
         spawnHudParticles(heartX, heartY, '255, 50, 50');
         camera.shakeDuration = 20;
         camera.shakeMagnitude = 8;
-        sounds.play('playerHurt');
 
         if (player.health <= 0) {
             player.health = 0;
@@ -721,11 +682,10 @@
         const gravestoneY = player.y + player.height - 20;
         gravestones.push({ x: gravestoneX, y: gravestoneY, facingRight: player.facingRight });
         spawnHudParticles(gravestoneX, gravestoneY, '255, 50, 50');
-        sounds.play('playerDeath');
     }
 
     function showGameOverScreen() {
-        if (!gameRunning) return;
+        if (!gameRunning && !player.isDying) return;
         gameRunning = false;
         player.isDying = false;
         cancelAnimationFrame(gameLoopId);
@@ -888,7 +848,10 @@
 
     // --- MAIN GAME LOOP ---
     function gameLoop() {
-        if (!gameRunning && !player.isDying) return;
+        if (!gameRunning && !player.isDying) {
+             cancelAnimationFrame(gameLoopId);
+             return;
+        }
         update();
         draw();
         drawHUD();
@@ -907,14 +870,18 @@
                     player.onGround = false;
                     player.coyoteTimeCounter = 0;
                     spawnJumpParticles(player.x + player.width / 2, player.y + player.height);
-                    sounds.play('jump');
                 } else if (player.canDoubleJump && !player.doubleJumpUsed) {
                     player.vy = JUMP_FORCE * 0.9;
                     player.doubleJumpUsed = true;
                     spawnJumpParticles(player.x + player.width / 2, player.y + player.height);
-                    sounds.play('jump');
                 } else {
                     player.jumpBufferCounter = JUMP_BUFFER_FRAMES;
+                }
+                break;
+            case 'KeyS': case 'ArrowDown':
+                if (player.onGround) {
+                    player.y += 5;
+                    player.onGround = false;
                 }
                 break;
         }
@@ -929,7 +896,6 @@
     });
 
     startButton.addEventListener('click', () => {
-        Tone.start(); // *** ADDED: Start audio context on user interaction
         startScreen.style.display = 'none';
         init();
         gameRunning = true;
