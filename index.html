@@ -22,7 +22,7 @@
             position: relative;
             border: 2px solid #555;
             box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
-            background-color: #0d1a2e;
+            /* The background color will now be controlled by JavaScript */
             width: 100%;
             max-width: 900px;
             height: 90vh;
@@ -165,11 +165,17 @@
     const TILE_SIZE = 50;
     const COYOTE_TIME_FRAMES = 8;
     const JUMP_BUFFER_FRAMES = 8;
-    const MAX_FALL_SPEED = 18; // To prevent tunneling through platforms
+    const MAX_FALL_SPEED = 18;
 
     let player, keys, camera, platforms, items, enemies, projectiles, particles, hudParticles, gravestones;
     let generationCursor;
     let xpShakeTimer = 0;
+
+    // Background color system variables
+    const defaultBgColor = { r: 13, g: 26, b: 46 };
+    let currentBgColor = { ...defaultBgColor };
+    let targetBgColor = { ...defaultBgColor };
+    let bgFlashTimer = 0;
 
     // Room Template Library
     const roomTemplates = {
@@ -244,9 +250,11 @@
 
         keys = { right: false, left: false, jump: false };
         camera = { 
-            x: 0, y: 0,
+            x: player.x,
+            y: player.y,
             zoom: 1.0, targetZoom: 1.0,
-            shakeDuration: 0, shakeMagnitude: 0
+            shakeDuration: 0, shakeMagnitude: 0,
+            zoomOverrideTimer: 0 // *** ADDED: Timer for special zoom effects
         };
         platforms = [];
         items = [];
@@ -420,13 +428,18 @@
 
         // Platform Collision
         const nearbyPlatforms = platforms.filter(p => 
-            p.x < player.x + canvas.width / 2 && p.x + p.width > player.x - canvas.width / 2
+            p.x < player.x + canvas.width && p.x + p.width > player.x - canvas.width
         );
 
         nearbyPlatforms.forEach(platform => {
-            if (player.x + player.width > platform.x && player.x < platform.x + platform.width &&
-                player.y + player.height > platform.y && player.y < platform.y + platform.height) {
-                if (player.vy >= 0 && (player.y + player.height - player.vy) <= platform.y) {
+            if (player.x + player.width > platform.x && 
+                player.x < platform.x + platform.width &&
+                player.vy >= 0) {
+                
+                const previousPlayerBottom = (player.y + player.height) - player.vy;
+                const currentPlayerBottom = player.y + player.height;
+
+                if (previousPlayerBottom <= platform.y && currentPlayerBottom >= platform.y) {
                     player.y = platform.y - player.height;
                     player.vy = 0;
                     player.onGround = true;
@@ -476,11 +489,13 @@
                     player.vy = STOMP_BOUNCE;
                     player.xp += 10;
                     xpShakeTimer = 20;
+                    triggerKillEffects(); // *** ADDED: Trigger kill effects
                 } else if (player.isImmune && player.powerUp === 'star') {
                     spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
                     enemies.splice(index, 1);
                     player.xp += 10;
                     xpShakeTimer = 20;
+                    triggerKillEffects(); // *** ADDED: Trigger kill effects
                 } else if (!player.isImmune) {
                     takeDamage(enemy.type === 'ghost' ? 1 : 2);
                 }
@@ -510,10 +525,14 @@
         }
 
         // Update Camera position and zoom
-        if (player.vx !== 0) {
-            camera.targetZoom = 1.1;
+        if (camera.zoomOverrideTimer > 0) {
+            camera.zoomOverrideTimer--;
         } else {
-            camera.targetZoom = 1.0;
+            if (player.vx !== 0) {
+                camera.targetZoom = 1.1;
+            } else {
+                camera.targetZoom = 1.0;
+            }
         }
         camera.zoom += (camera.targetZoom - camera.zoom) * 0.04;
 
@@ -549,9 +568,20 @@
         }
 
         // Check for falling out of world
-        if (player.y > camera.y + canvas.height + 400) { 
+        const bottomOfScreen = camera.y + (canvas.height / 2) / camera.zoom;
+        if (player.y > bottomOfScreen) { 
             startDeathSequence(); 
         }
+
+        // Update background color
+        if (bgFlashTimer > 0) {
+            bgFlashTimer--;
+        } else {
+            targetBgColor = { ...defaultBgColor };
+        }
+        currentBgColor.r += (targetBgColor.r - currentBgColor.r) * 0.1;
+        currentBgColor.g += (targetBgColor.g - currentBgColor.g) * 0.1;
+        currentBgColor.b += (targetBgColor.b - currentBgColor.b) * 0.1;
     }
 
     function updateEnemies() {
@@ -605,6 +635,19 @@
         }
     }
 
+    function triggerBackgroundFlash(color, duration) {
+        targetBgColor = color;
+        bgFlashTimer = duration;
+    }
+
+    // *** ADDED: Function for kill effects ***
+    function triggerKillEffects() {
+        camera.shakeDuration = 10;
+        camera.shakeMagnitude = 4;
+        camera.targetZoom = 1.15;
+        camera.zoomOverrideTimer = 15;
+    }
+
     function collectItem(type) {
         switch (type) {
             case 'xp': 
@@ -617,12 +660,14 @@
                     const heartY = 15 + 12;
                     player.health++; 
                     spawnHudParticles(heartX, heartY, '255, 255, 0');
+                    triggerBackgroundFlash({ r: 13, g: 50, b: 46 }, 20);
                 } 
                 break;
             case 'star': 
             case 'boots': 
             case 'bolt': 
                 startPowerUp(type, type === 'star' ? 15*60 : type === 'boots' ? 30*60 : 25*60); 
+                triggerBackgroundFlash({ r: 30, g: 50, b: 80 }, 20);
                 break;
         }
     }
@@ -640,6 +685,7 @@
         spawnHudParticles(heartX, heartY, '255, 50, 50');
         camera.shakeDuration = 20;
         camera.shakeMagnitude = 8;
+        triggerBackgroundFlash({ r: 0, g: 0, b: 0 }, 15);
 
         if (player.health <= 0) {
             player.health = 0;
@@ -682,6 +728,7 @@
         const gravestoneY = player.y + player.height - 20;
         gravestones.push({ x: gravestoneX, y: gravestoneY, facingRight: player.facingRight });
         spawnHudParticles(gravestoneX, gravestoneY, '255, 50, 50');
+        targetBgColor = { r: 0, g: 0, b: 0 };
     }
 
     function showGameOverScreen() {
@@ -695,8 +742,11 @@
 
     // --- DRAW LOGIC ---
     function draw() {
-        ctx.fillStyle = '#0d1a2e';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const bgR = Math.round(currentBgColor.r);
+        const bgG = Math.round(currentBgColor.g);
+        const bgB = Math.round(currentBgColor.b);
+        canvas.style.backgroundColor = `rgb(${bgR}, ${bgG}, ${bgB})`;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         ctx.save();
         
