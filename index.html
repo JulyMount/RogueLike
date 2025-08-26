@@ -177,7 +177,7 @@
     let targetBgColor = { ...defaultBgColor };
     let bgFlashTimer = 0;
 
-    // Room Template Library
+    // *** CHANGED: Added more room templates ***
     const roomTemplates = {
         'start': {
             width: 4 * TILE_SIZE,
@@ -224,6 +224,37 @@
                 { x: 0, y: 8 * TILE_SIZE, width: 10 * TILE_SIZE }
             ],
             exit: { x: 10 * TILE_SIZE, y: 8 * TILE_SIZE }
+        },
+        'staircase_down': {
+            width: 12 * TILE_SIZE,
+            platforms: [
+                { x: 0, y: 0, width: 3 * TILE_SIZE },
+                { x: 3 * TILE_SIZE, y: 1.5 * TILE_SIZE, width: 3 * TILE_SIZE },
+                { x: 6 * TILE_SIZE, y: 3 * TILE_SIZE, width: 3 * TILE_SIZE },
+                { x: 9 * TILE_SIZE, y: 4.5 * TILE_SIZE, width: 3 * TILE_SIZE }
+            ],
+            exit: { x: 12 * TILE_SIZE, y: 4.5 * TILE_SIZE }
+        },
+        'pillar_room': {
+            width: 15 * TILE_SIZE,
+            platforms: [
+                { x: 0, y: 0, width: 15 * TILE_SIZE },
+                { x: 3 * TILE_SIZE, y: -3 * TILE_SIZE, width: 1.5 * TILE_SIZE },
+                { x: 8 * TILE_SIZE, y: -4 * TILE_SIZE, width: 1.5 * TILE_SIZE },
+                { x: 12 * TILE_SIZE, y: -2 * TILE_SIZE, width: 1.5 * TILE_SIZE }
+            ],
+            exit: { x: 15 * TILE_SIZE, y: 0 }
+        },
+        'chain_jump': {
+            width: 14 * TILE_SIZE,
+            platforms: [
+                { x: 0, y: 0, width: 3 * TILE_SIZE },
+                { x: 4.5 * TILE_SIZE, y: -0.5 * TILE_SIZE, width: 1 * TILE_SIZE },
+                { x: 7 * TILE_SIZE, y: 0 * TILE_SIZE, width: 1 * TILE_SIZE },
+                { x: 9.5 * TILE_SIZE, y: -0.5 * TILE_SIZE, width: 1 * TILE_SIZE },
+                { x: 11 * TILE_SIZE, y: 0, width: 3 * TILE_SIZE }
+            ],
+            exit: { x: 14 * TILE_SIZE, y: 0 }
         }
     };
 
@@ -254,7 +285,7 @@
             y: player.y,
             zoom: 1.0, targetZoom: 1.0,
             shakeDuration: 0, shakeMagnitude: 0,
-            zoomOverrideTimer: 0 // *** ADDED: Timer for special zoom effects
+            zoomOverrideTimer: 0
         };
         platforms = [];
         items = [];
@@ -320,8 +351,13 @@
     }
 
     function spawnEnemy(platform) {
-        const enemyTypes = ['ghost', 'flyer', 'dragon'];
-        const type = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+        let type = ['ghost', 'flyer', 'dragon'][Math.floor(Math.random() * 3)];
+        
+        // *** FIXED: Prevent dragons on small platforms ***
+        if (type === 'dragon' && platform.width < TILE_SIZE * 2.5) {
+            type = 'ghost'; // Spawn a ghost instead
+        }
+
         const yPos = platform.y - 45;
 
         enemies.push({
@@ -484,18 +520,54 @@
             if (player.x < enemy.x + enemy.width && player.x + player.width > enemy.x &&
                 player.y < enemy.y + enemy.height && player.y + player.height > enemy.y) {
                 if (player.vy > 0 && (player.y + player.height - player.vy) <= enemy.y + 10) {
+                    
+                    let isOverVoid = true;
+                    const checkDistance = 50;
+                    for (const p of platforms) {
+                        if (enemy.x + enemy.width > p.x && 
+                            enemy.x < p.x + p.width &&
+                            enemy.y < p.y && p.y < enemy.y + enemy.height + checkDistance) {
+                            isOverVoid = false;
+                            break;
+                        }
+                    }
+
+                    if (isOverVoid) {
+                        let closestPlatformAbove = null;
+                        let minDistance = Infinity;
+                        for (const p of platforms) {
+                            if (enemy.x + enemy.width > p.x && 
+                                enemy.x < p.x + p.width &&
+                                p.y < enemy.y) {
+                                const distance = enemy.y - (p.y + p.height);
+                                if (distance < minDistance) {
+                                    minDistance = distance;
+                                    closestPlatformAbove = p;
+                                }
+                            }
+                        }
+                        
+                        if (closestPlatformAbove) {
+                            const jumpHeight = minDistance + player.height;
+                            player.vy = -Math.sqrt(2 * GRAVITY * jumpHeight) * 1.1;
+                        } else {
+                            player.vy = JUMP_FORCE * 1.2;
+                        }
+                    } else {
+                        player.vy = STOMP_BOUNCE;
+                    }
+                    
                     spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
                     enemies.splice(index, 1);
-                    player.vy = STOMP_BOUNCE;
                     player.xp += 10;
                     xpShakeTimer = 20;
-                    triggerKillEffects(); // *** ADDED: Trigger kill effects
+                    triggerKillEffects();
                 } else if (player.isImmune && player.powerUp === 'star') {
                     spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
                     enemies.splice(index, 1);
                     player.xp += 10;
                     xpShakeTimer = 20;
-                    triggerKillEffects(); // *** ADDED: Trigger kill effects
+                    triggerKillEffects();
                 } else if (!player.isImmune) {
                     takeDamage(enemy.type === 'ghost' ? 1 : 2);
                 }
@@ -640,7 +712,6 @@
         bgFlashTimer = duration;
     }
 
-    // *** ADDED: Function for kill effects ***
     function triggerKillEffects() {
         camera.shakeDuration = 10;
         camera.shakeMagnitude = 4;
