@@ -177,7 +177,7 @@
     let targetBgColor = { ...defaultBgColor };
     let bgFlashTimer = 0;
 
-    // *** CHANGED: Added more room templates ***
+    // Room Template Library
     const roomTemplates = {
         'start': {
             width: 4 * TILE_SIZE,
@@ -353,9 +353,8 @@
     function spawnEnemy(platform) {
         let type = ['ghost', 'flyer', 'dragon'][Math.floor(Math.random() * 3)];
         
-        // *** FIXED: Prevent dragons on small platforms ***
         if (type === 'dragon' && platform.width < TILE_SIZE * 2.5) {
-            type = 'ghost'; // Spawn a ghost instead
+            type = 'ghost';
         }
 
         const yPos = platform.y - 45;
@@ -519,8 +518,11 @@
         enemies.forEach((enemy, index) => {
             if (player.x < enemy.x + enemy.width && player.x + player.width > enemy.x &&
                 player.y < enemy.y + enemy.height && player.y + player.height > enemy.y) {
-                if (player.vy > 0 && (player.y + player.height - player.vy) <= enemy.y + 10) {
-                    
+                
+                const isStomp = player.vy > 0 && (player.y + player.height - player.vy) <= enemy.y + 10;
+                const isStarKill = player.isImmune && player.powerUp === 'star';
+
+                if (isStomp || isStarKill) {
                     let isOverVoid = true;
                     const checkDistance = 50;
                     for (const p of platforms) {
@@ -553,16 +555,10 @@
                         } else {
                             player.vy = JUMP_FORCE * 1.2;
                         }
-                    } else {
+                    } else if (isStomp) { // Only give stomp bounce if it was a stomp
                         player.vy = STOMP_BOUNCE;
                     }
                     
-                    spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
-                    enemies.splice(index, 1);
-                    player.xp += 10;
-                    xpShakeTimer = 20;
-                    triggerKillEffects();
-                } else if (player.isImmune && player.powerUp === 'star') {
                     spawnExplosionParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
                     enemies.splice(index, 1);
                     player.xp += 10;
