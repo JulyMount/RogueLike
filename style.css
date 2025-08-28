@@ -1,0 +1,132 @@
+body {
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #1a1a1a;
+    color: #fff;
+    font-family: 'Courier New', Courier, monospace;
+    overflow: hidden;
+}
+#game-container {
+    position: relative;
+    border: 2px solid #555;
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+    width: 100%;
+    max-width: 900px;
+    height: 90vh;
+    max-height: 600px;
+}
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+#hud {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Allows clicks to go through to the canvas */
+    font-size: 24px;
+    text-shadow: 2px 2px 4px #000;
+}
+#health {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+}
+#xp {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+}
+#xp-text {
+    display: inline-block; /* Needed for transform to work correctly */
+    transition: transform 0.1s, color 0.1s, font-weight 0.1s;
+}
+#power-up {
+    position: absolute;
+    bottom: 15px;
+    left: 15px;
+    font-size: 32px;
+}
+.blinking {
+    animation: blink-animation 0.5s step-end infinite;
+}
+@keyframes blink-animation {
+    50% {
+        opacity: 0;
+    }
+}
+#start-screen, #game-over-screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    z-index: 10;
+}
+h1 {
+    font-size: 48px;
+    color: #00ffff;
+}
+p {
+    font-size: 18px;
+    max-width: 80%;
+}
+button {
+    padding: 10px 20px;
+    font-size: 20px;
+    background-color: #00ffff;
+    border: none;
+    color: #1a1a1a;
+    cursor: pointer;
+    border-radius: 5px;
+    margin-top: 20px;
+    box-shadow: 0 0 10px #00ffff;
+    transition: all 0.2s;
+}
+button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px #00ffff;
+}
+
+/* Estilos da Barra de Vida do Chefe */
+#boss-hud {
+    position: absolute;
+    top: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 50%;
+    max-width: 400px;
+    text-align: center;
+}
+#boss-name {
+    font-size: 18px;
+    text-shadow: 1px 1px 2px #000;
+}
+#boss-health-bar-bg {
+    width: 100%;
+    height: 20px;
+    background-color: #444;
+    border: 2px solid #fff;
+    border-radius: 5px;
+    margin-top: 5px;
+}
+#boss-health-bar {
+    width: 100%;
+    height: 100%;
+    background-color: #ff4141;
+    border-radius: 3px;
+    transition: width 0.3s ease-out;
+}
