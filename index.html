@@ -19,7 +19,7 @@
 
     <div id="boss-hud" style="display: none;">
         <div id="boss-name">
-    <span id="boss-phase-icons"></span> Gorila Furioso</div>
+    <span id="boss-phase-icons"></span> <span id="boss-name-span"></span></div>
         <div id="boss-health-bar-bg">
             <div id="boss-health-bar"></div>
         </div>
@@ -31,10 +31,12 @@
         <p>Explore o mapa, colete 🔆 para XP e pise nos inimigos para derrotá-los!</p>
         <p>💊: Recupera Vida | ⭐: Invencibilidade | 👣: Pulo Duplo | ⚡: Velocidade</p>
         <button id="start-button">Iniciar Jogo</button>
+        <div id="high-score-display">High Score: 0</div>
     </div>
     <div id="game-over-screen" style="display: none;">
         <h1>Fim de Jogo</h1>
         <p id="final-score"></p>
+        <div id="final-high-score-display">High Score: 0</div>
         <button id="restart-button">Jogar Novamente</button>
     </div>
     <canvas id="gameCanvas"></canvas>
